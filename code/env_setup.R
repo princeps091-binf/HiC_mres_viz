@@ -11,5 +11,6 @@ renv::install("viridis")
 renv::install("glue")
 
 renv::install("caret")
+renv::install("igraph")
 
 renv::snapshot()

@@ -1,8 +1,11 @@
 library(Matrix)
 library(data.tree)
+library(GenomicRanges)
 library(caret)
 library(tidyverse)
 library(parallel)
+library(igraph)
+library(viridis)
 options(scipen = 999999999)
 res_set <- c('1Mb','500kb','100kb','50kb','10kb','5kb')
 res_num <- c(1e6,5e5,1e5,5e4,1e4,5e3)
@@ -57,34 +60,6 @@ bin_map_res_fn<-function(chr_spec_res_99,res_num){
   rm(i,r,tmp_df,r_bin,bin_res_map,bin_top)
   return(bin_res_map_df)
 }
-#convert low-resolution interactions to highest resolution interactions
-convert_to_hires_fn<-function(tmp_dat,tmp_res,res_num,hi_res){
-  fn_env<-environment()
-  cl<-makeCluster(5)
-  clusterEvalQ(cl, {
-    library(dplyr)
-    library(tidyr)
-    print("node ready")
-  })
-  clusterExport(cl,c("tmp_dat","tmp_res","res_num","hi_res"),envir = fn_env)
-  
-  out_tbl<-do.call(bind_rows,parLapply(cl,1:nrow(tmp_dat),function(x){
-    r_bin<-lapply(tmp_dat[x,c(1,2)],function(i){
-      tmp<-seq(i,i+res_num[tmp_res],by=hi_res)
-      return(tmp[-length(tmp)])
-    })
-    tmp_df<-expand_grid(ego=r_bin$X1,alter=r_bin$X2)
-    tmp_df<-tmp_df%>%mutate(raw=unlist(tmp_dat[x,3]))
-    tmp_df<-tmp_df%>%mutate(pow=unlist(tmp_dat[x,4]))
-    tmp_df<-tmp_df%>%mutate(res=tmp_res)
-    tmp_df<-tmp_df%>%mutate(color=unlist(tmp_dat[x,5]))
-    
-    return(tmp_df)  
-  }))
-  stopCluster(cl)
-  rm(cl)
-  return(out_tbl)
-}
 #Produce interaction matrix
 full_f_mat<-function(cl_mat,res){
   
@@ -100,8 +75,8 @@ full_f_mat<-function(cl_mat,res){
   cl_mat$alter_id<-id_conv[as.character(cl_mat$alter)]
   
   #chr_mat<-sparseMatrix(i=cl_mat$ego_id,cl_mat$alter_id,x=sqrt(-log10(cl_mat$pois.pval)),symmetric = T)
-  chr_mat<-sparseMatrix(i=cl_mat$ego_id,cl_mat$alter_id,x=cl_mat$color,symmetric = T)
-  
+  chr_mat<-sparseMatrix(i=cl_mat$ego_id,cl_mat$alter_id,x=cl_mat$bpt_dist)
+  return(chr_mat)
 }
 
 ########################################################################################################
@@ -125,83 +100,65 @@ chr_hub_tbl<-get_tbl_in_fn(hub_file) %>%
   filter(chr==chromo)
 tmp_cl<-"50kb_34_561_38100000_39750000"
 tmp_cl_res<-str_split_fixed(tmp_cl,pattern = "_",2)[,1]
-tmp_res_set<-names(which(res_num<=res_num[tmp_cl_res]))
-
-# Subset conversion table to only consider bins contained in cluster of interest
 cl_bin<-as.numeric(chr_spec_res$cl_member[[tmp_cl]])
+
 tmp_col<-grep(tmp_cl_res[1],colnames(bin_res_map_df),value = T)
 cl_bin_convert_tbl<-bin_res_map_df%>%
   filter(!!rlang::sym(tmp_col) >= min(cl_bin) & !!rlang::sym(tmp_col) <= max(cl_bin))
-#----------------------------------------------------------------------------------------------------
-#Extract the interactions of every constitutive child-cluster
-dat_file<-'~/Documents/multires_bhicect/data/H1/'
 
-chr_dat_l<-lapply(tmp_res_set,function(x)read_delim(file = paste0(dat_folder,x,'/',chromo,'.txt'),delim = '\t',col_names = F))
-names(chr_dat_l)<-tmp_res_set
-chr_dat_l<-lapply(chr_dat_l,function(x){
-  x%>%filter(!(is.nan(X3)))%>%filter(X1!=X2)
-})
-chr_dat_l<-lapply(chr_dat_l,function(x){
-  preprocessParams <- BoxCoxTrans(x$X3,na.rm = T)
-  x <- data.frame(x,weight=predict(preprocessParams, x$X3))
-  x$weight<-x$weight+(1-min(x$weight,na.rm = T))
-  return(x)
-})
-# Produce color-scale separating each resolution into separate color-channel
-chr_dat_l<-lapply(seq_along(tmp_res_set),function(x){
-  tmp_dat<-chr_dat_l[[tmp_res_set[x]]]
-  toMin<-(x-1)*100 +1
-  toMax<-(x-1)*100 +99
-  tmp_dat$color<-toMin+(tmp_dat$weight-min(tmp_dat$weight))/(max(tmp_dat$weight)-min(tmp_dat$weight))*(toMax-toMin)
-  return(tmp_dat)
-})
-names(chr_dat_l)<-tmp_res_set
-#----------------------------------------------------------------------------------------------------
-#Filter the Hi-C dataset to only contain parent cluster bins
+tmp_cl_child<-c(tmp_cl,names(which(unlist(lapply(node_ancestor, function(x){
+  tmp_cl %in% x
+})))))
+cl_leaves<-tmp_cl_child[tmp_cl_child %in% chr_bpt$Get('name',filterFun = isLeaf)]
+cl_node_set<-unique(c(cl_leaves,unique(unlist(node_ancestor[cl_leaves])))) 
 
-cl_dat_l<-lapply(tmp_res_set,function(x){
-  tmp_col<-grep(x,colnames(bin_res_map_df),value = T)
-  tmp_res_max<-cl_bin_convert_tbl %>% 
-    summarise(max=max(!!rlang::sym(tmp_col)),
-              min=min(!!rlang::sym(tmp_col)))
-  
-  chr_dat_l[[x]]%>%
-    filter(X1 <= tmp_res_max$max & X1 >= tmp_res_max$min & X2 <= tmp_res_max$max & X2 >= tmp_res_max$min)
-})
-names(cl_dat_l)<-tmp_res_set
-#----------------------------------------------------------------------------------------------------
-#Convert all data to 5kb resolution
+chr_bpt2<-FromListSimple(chr_spec_res$part_tree)
 
+Prune(chr_bpt2, function(x) x$name %in% cl_node_set)
 
-cl_dat_hires_l<-lapply(names(cl_dat_l)[-length(cl_dat_l)],function(r){
-  message(r)
-  return(convert_to_hires_fn(cl_dat_l[[r]],r,res_num,5000))
+g_bpt<-as.igraph.Node(chr_bpt2,directed = T,direction = 'climb')
 
-})
-cl_dat_hires_l[[length(cl_dat_l)]]<-tibble(cl_dat_l[[length(cl_dat_l)]]) %>% 
-  dplyr::rename(ego=X1,alter=X2,raw=X3,pow=weight)
-names(cl_dat_hires_l)<-names(cl_dat_l)
+bpt_dist_mat<-distances(g_bpt,cl_leaves,cl_leaves)
 
-tmp_f_dat<-cl_dat_hires_l[[length(cl_dat_hires_l)]]
-for(i in (length(cl_dat_hires_l)):2){
-  message(i)
-  tmp_f_dat<- tmp_f_dat%>% 
-    dplyr::select(ego,alter,color) %>% 
-    full_join(.,cl_dat_hires_l[[i-1]] %>% 
-                dplyr::select(ego,alter,color) %>% 
-                rename(color.b=color)) %>% 
-    mutate(color=ifelse(is.na(color),color.b,color)) %>% 
-    dplyr::select(-color.b)
-}
+cl_leaf_tbl<-tibble(leaf=cl_leaves,bin=chr_spec_res$cl_member[cl_leaves]) %>% 
+  mutate(res=str_split_fixed(leaf,"_",2)[,1]) %>% 
+  mutate(GRange=pmap(list(chromo,bin,res),function(chromo,bin,res){
+    
+    IRanges::reduce(GRanges(seqnames=chromo,
+                            ranges = IRanges(start=as.numeric(bin),
+                                             end=as.numeric(bin) + res_num[res] - 1
+                            )))
+    
+    
+  }))
+hires_bin_tbl<-cl_bin_convert_tbl %>% 
+  dplyr::select(contains("_5kb")) %>% 
+  as_tibble %>% 
+  dplyr::rename(start=bin_5kb) %>% 
+  mutate(end=start + 4999) %>% 
+  mutate(GRange=pmap(list(chromo,start,end),function(chromo,start,end){
+    
+    IRanges::reduce(GRanges(seqnames=chromo,
+                            ranges = IRanges(start=start,
+                                             end=end
+                            )))
+    
+    
+  }))
+hires_bin_GrangeL<-GRangesList(hires_bin_tbl$GRange)
+cl_leaf_GrangeL<-GRangesList(cl_leaf_tbl$GRange)
+bin_to_leaf_tbl<-findOverlaps(hires_bin_GrangeL,cl_leaf_GrangeL) %>% 
+  as_tibble %>% 
+  mutate(bin=hires_bin_tbl$start[queryHits],
+         leaf=cl_leaf_tbl$leaf[subjectHits]) %>% 
+  dplyr::select(bin,leaf)
 
-
-p_breaks<-c(unlist(lapply(seq_along(res_set),function(x){
-  seq((x-1)*100,(x-1)*100 +100,length.out = 101)[-101]
-})),(length(res_set)-1)*100 +100)
-
-p_color<-rev(RColorBrewer::brewer.pal(n=length(res_set),name = "Set1"))
-p_col<-unlist(lapply(seq_along(res_set),function(x){
-  colorRampPalette(c("black",p_color[x]))(100)
-}))
-cl_f_mat<-full_f_mat(tmp_f_dat,5000)
-image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks)
+hi_res_inter_tbl<-expand_grid(ego=bin_to_leaf_tbl$bin,alter=bin_to_leaf_tbl$bin) %>% 
+  left_join(.,bin_to_leaf_tbl,by=c("ego"="bin")) %>%
+  dplyr::rename(ego.leaf=leaf) %>% 
+  left_join(.,bin_to_leaf_tbl,by=c("alter"="bin")) %>% 
+  dplyr::rename(alter.leaf=leaf)
+hi_res_inter_tbl<-hi_res_inter_tbl %>% 
+  mutate(bpt_dist=log(1/(1+bpt_dist_mat[as.matrix(hi_res_inter_tbl[,c(3,4)])])))
+cl_f_mat<-full_f_mat(hi_res_inter_tbl,5000)
+image(as.matrix(cl_f_mat),col=viridis(100))
