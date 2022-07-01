@@ -57,7 +57,31 @@ bin_map_res_fn<-function(chr_spec_res_99,res_num){
   rm(i,r,tmp_df,r_bin,bin_res_map,bin_top)
   return(bin_res_map_df)
 }
-#convert low-resolution interactions to highest resolution interactions
+
+#Extract children HiC data
+extract_cl_dat_fn<-function(child_cl_lvl_tbl,cl_dat_l){
+  fn_env<-environment()
+  cl<-makeCluster(5)
+  clusterEvalQ(cl, {
+    library(dplyr)
+  })
+  clusterExport(cl,c("child_cl_lvl_tbl",'cl_dat_l'),envir = fn_env)
+  cl_child_inter<-parLapply(cl,1:nrow(child_cl_lvl_tbl),function(r){
+    tmp_res<-child_cl_lvl_tbl$res[r]
+    tmp_bin<-as.numeric(child_cl_lvl_tbl$bins[[r]])
+    tmp_ref<-cl_dat_l[[tmp_res]]
+    tmp_dat<-tmp_ref%>%filter(X1 %in% tmp_bin & X2 %in% tmp_bin)
+    
+    return(as_tibble(tmp_dat))
+  })
+  stopCluster(cl)
+  rm(cl)
+  
+  return(child_cl_lvl_tbl %>% 
+           mutate(HiC=cl_child_inter))
+  
+}
+
 convert_to_hires_fn<-function(tmp_dat,tmp_res,res_num,hi_res){
   fn_env<-environment()
   cl<-makeCluster(5)
@@ -85,6 +109,7 @@ convert_to_hires_fn<-function(tmp_dat,tmp_res,res_num,hi_res){
   rm(cl)
   return(out_tbl)
 }
+
 #Produce interaction matrix
 full_f_mat<-function(cl_mat,res){
   
@@ -127,11 +152,12 @@ tmp_cl<-"50kb_34_561_38100000_39750000"
 tmp_cl_res<-str_split_fixed(tmp_cl,pattern = "_",2)[,1]
 tmp_res_set<-names(which(res_num<=res_num[tmp_cl_res]))
 
-# Subset conversion table to only consider bins contained in cluster of interest
-cl_bin<-as.numeric(chr_spec_res$cl_member[[tmp_cl]])
-tmp_col<-grep(tmp_cl_res[1],colnames(bin_res_map_df),value = T)
-cl_bin_convert_tbl<-bin_res_map_df%>%
-  filter(!!rlang::sym(tmp_col) >= min(cl_bin) & !!rlang::sym(tmp_col) <= max(cl_bin))
+tmp_cl_child<-c(tmp_cl,names(which(unlist(lapply(node_ancestor, function(x){
+  tmp_cl %in% x
+})))))
+child_cl_lvl_tbl<-tibble(node=tmp_cl_child,lvl=node_lvl[tmp_cl_child],bins=chr_spec_res$cl_member[tmp_cl_child]) %>% 
+  mutate(res=str_split_fixed(node,"_",2)[,1])
+
 #----------------------------------------------------------------------------------------------------
 #Extract the interactions of every constitutive child-cluster
 dat_file<-'~/Documents/multires_bhicect/data/H1/'
@@ -157,37 +183,49 @@ chr_dat_l<-lapply(seq_along(tmp_res_set),function(x){
 })
 names(chr_dat_l)<-tmp_res_set
 #----------------------------------------------------------------------------------------------------
-#Filter the Hi-C dataset to only contain parent cluster bins
+#Filter the Hi-C dataset to only contain parent and children cluster bins
 
 cl_dat_l<-lapply(tmp_res_set,function(x){
-  tmp_col<-grep(x,colnames(bin_res_map_df),value = T)
-  tmp_res_max<-cl_bin_convert_tbl %>% 
-    summarise(max=max(!!rlang::sym(tmp_col)),
-              min=min(!!rlang::sym(tmp_col)))
-  
+  tmp_res_max<-child_cl_lvl_tbl %>% 
+    filter(res==x) 
+  bin_range<-range(as.numeric(unique(unlist(tmp_res_max$bins))))
   chr_dat_l[[x]]%>%
-    filter(X1 <= tmp_res_max$max & X1 >= tmp_res_max$min & X2 <= tmp_res_max$max & X2 >= tmp_res_max$min)
+    filter(X1 <= bin_range[2] & X1 >= bin_range[1] & X2 <= bin_range[2] & X2 >= bin_range[1])
 })
 names(cl_dat_l)<-tmp_res_set
 #----------------------------------------------------------------------------------------------------
-#Convert all data to 5kb resolution
-
-
-cl_dat_hires_l<-lapply(names(cl_dat_l)[-length(cl_dat_l)],function(r){
-  message(r)
-  return(convert_to_hires_fn(cl_dat_l[[r]],r,res_num,5000))
-
+#Extract original HiC data for every cluster at the resolution they are found
+child_cl_lvl_tbl<-extract_cl_dat_fn(child_cl_lvl_tbl,cl_dat_l)
+child_cl_lvl_tbl<-child_cl_lvl_tbl %>% 
+  mutate(i=str_split_fixed(node,"_",4)[,3]) %>% 
+  filter(i>0) %>% 
+  dplyr::select(-i)
+#Convert all interaction to 5kb resolution 
+cl_hires_dat_l<-lapply(1:nrow(child_cl_lvl_tbl),function(i){
+  message(round(i/nrow(child_cl_lvl_tbl),digits = 3))
+  tmp_dat<-child_cl_lvl_tbl$HiC[[i]]
+  tmp_res<-child_cl_lvl_tbl$res[i]
+  hi_res<-5000
+  convert_to_hires_fn(tmp_dat,tmp_res,res_num,hi_res)
 })
-cl_dat_hires_l[[length(cl_dat_l)]]<-tibble(cl_dat_l[[length(cl_dat_l)]]) %>% 
-  dplyr::rename(ego=X1,alter=X2,raw=X3,pow=weight)
-names(cl_dat_hires_l)<-names(cl_dat_l)
+child_cl_lvl_tbl<-child_cl_lvl_tbl %>% 
+  mutate(HiC.hires=cl_hires_dat_l)
 
-tmp_f_dat<-cl_dat_hires_l[[length(cl_dat_hires_l)]]
-for(i in (length(cl_dat_hires_l)):2){
+lvl_seq<-sort(unique(child_cl_lvl_tbl$lvl),decreasing = T)
+
+tmp_lvl_dat<-child_cl_lvl_tbl %>% 
+  filter(lvl==lvl_seq[1])
+tmp_seed<-do.call(bind_rows,tmp_lvl_dat$HiC.hires)
+
+for(i in lvl_seq[-1]){
   message(i)
-  tmp_f_dat<- tmp_f_dat%>% 
+  tmp_up_lvl_dat_tbl<-child_cl_lvl_tbl %>% 
+    filter(lvl==i)
+  tmp_up_lvl_dat<-do.call(bind_rows,tmp_up_lvl_dat_tbl$HiC.hires)
+  
+  tmp_seed<- tmp_seed%>% 
     dplyr::select(ego,alter,color) %>% 
-    full_join(.,cl_dat_hires_l[[i-1]] %>% 
+    full_join(.,tmp_up_lvl_dat %>% 
                 dplyr::select(ego,alter,color) %>% 
                 rename(color.b=color)) %>% 
     mutate(color=ifelse(is.na(color),color.b,color)) %>% 
@@ -203,5 +241,5 @@ p_color<-rev(RColorBrewer::brewer.pal(n=length(res_set),name = "Set1"))
 p_col<-unlist(lapply(seq_along(res_set),function(x){
   colorRampPalette(c("white",p_color[x]))(100)
 }))
-cl_f_mat<-full_f_mat(tmp_f_dat,5000)
+cl_f_mat<-full_f_mat(tmp_seed,5000)
 image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks)
