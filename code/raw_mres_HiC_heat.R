@@ -134,7 +134,7 @@ cl_bin_convert_tbl<-bin_res_map_df%>%
   filter(!!rlang::sym(tmp_col) >= min(cl_bin) & !!rlang::sym(tmp_col) <= max(cl_bin))
 #----------------------------------------------------------------------------------------------------
 #Extract the interactions of every constitutive child-cluster
-dat_file<-'~/Documents/multires_bhicect/data/H1/'
+dat_file<-'~/Documents/multires_bhicect/data/H1/Dekker/'
 
 chr_dat_l<-lapply(tmp_res_set,function(x)read_delim(file = paste0(dat_folder,x,'/',chromo,'.txt'),delim = '\t',col_names = F))
 names(chr_dat_l)<-tmp_res_set
@@ -195,13 +195,49 @@ for(i in (length(cl_dat_hires_l)):2){
 }
 
 
-p_breaks<-c(unlist(lapply(seq_along(res_set),function(x){
+p_breaks<-c(unlist(lapply(seq_along(tmp_res_set),function(x){
   seq((x-1)*100,(x-1)*100 +100,length.out = 101)[-101]
 })),(length(res_set)-1)*100 +100)
 
-p_color<-rev(RColorBrewer::brewer.pal(n=length(res_set),name = "Set1"))
-p_col<-unlist(lapply(seq_along(res_set),function(x){
+p_color<-rev(RColorBrewer::brewer.pal(n=length(tmp_res_set),name = "Set1"))
+p_col<-unlist(lapply(seq_along(tmp_res_set),function(x){
   colorRampPalette(c("black",p_color[x]))(100)
 }))
+
+cl_hires_bin<-unique(c(tmp_f_dat$ego,tmp_f_dat$alter))
+
+tick_pos<-which(cl_hires_bin %% 5e5 == 0)/nrow(cl_f_mat)
+tick_label<-paste0(cl_hires_bin[which(cl_hires_bin %% 5e5 == 0)]/1e6,"Mb")
+
 cl_f_mat<-full_f_mat(tmp_f_dat,5000)
-image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks)
+image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks,axes = FALSE)
+axis(1, at = tick_pos,
+     labels = tick_label,
+     
+)
+legend(x = "top",
+       inset = c(0, -0.12), # You will need to fine-tune the first
+       # value depending on the windows size
+       ncol=length(tmp_res_set),
+       legend = tmp_res_set, 
+       fill = p_color,
+       xpd = TRUE)
+
+png(filename = "./img/raw_mres_heat.png", width =40,height = 50,units = 'mm',type='cairo',res=1000)
+par(mar=c(1.25,0,1.25,0),cex.axis = 0.4,mgp=c(3, 0.25, 0))
+
+image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks,axes = FALSE)
+axis(1, at = tick_pos,
+     labels = tick_label,
+     
+)
+legend(x = "top",
+       inset = c(0, -0.12), # You will need to fine-tune the first
+       # value depending on the windows size
+       ncol=length(tmp_res_set),
+       legend = tmp_res_set, 
+       fill = p_color,
+       cex = 0.4, # Change legend size
+       xpd = TRUE)
+
+dev.off()

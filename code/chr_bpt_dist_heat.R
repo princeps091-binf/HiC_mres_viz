@@ -6,6 +6,7 @@ library(tidyverse)
 library(parallel)
 library(igraph)
 library(viridis)
+library(furrr)
 options(scipen = 999999999)
 res_set <- c('1Mb','500kb','100kb','50kb','10kb','5kb')
 res_num <- c(1e6,5e5,1e5,5e4,1e4,5e3)
@@ -78,11 +79,9 @@ full_f_mat<-function(cl_mat,res){
   chr_mat<-sparseMatrix(i=cl_mat$ego_id,cl_mat$alter_id,x=cl_mat$bpt_dist)
   return(chr_mat)
 }
-
 ########################################################################################################
-hub_file<-"~/Documents/multires_bhicect/Bootstrapp_fn/data/DAGGER_tbl/trans_res/H1_union_trans_res_dagger_tbl.Rda"
-spec_res_folder<-"~/Documents/multires_bhicect/data/H1/Dekker/spec_res/"
-dat_folder<-"~/Documents/multires_bhicect/data/H1/Dekker/"
+spec_res_folder<-"/storage/mathelierarea/processed/vipin/group/HiC_data/H1/Dekker/spec_res/"
+dat_folder<-"/storage/mathelierarea/processed/vipin/group/HiC_data/H1/Dekker/"
 ########################################################################################################
 # Load considered chromosome
 chromo<-"chr22"
@@ -95,34 +94,16 @@ node_lvl<-sort(chr_bpt$Get('level'))[-c(1)]
 bin_res_map_df<-bin_map_res_fn(chr_spec_res,res_num)
 bin_res_map_df[,1]<-as.numeric(as.character(bin_res_map_df[,1]))
 
-#-----------------------
-chr_hub_tbl<-get_tbl_in_fn(hub_file) %>%
-  filter(chr==chromo)
-tmp_cl<-"50kb_34_561_38100000_39750000"
-tmp_cl_res<-str_split_fixed(tmp_cl,pattern = "_",2)[,1]
-cl_bin<-as.numeric(chr_spec_res$cl_member[[tmp_cl]])
+chr_leaves<-chr_bpt$Get('name',filterFun = isLeaf)
 
-tmp_col<-grep(tmp_cl_res[1],colnames(bin_res_map_df),value = T)
-cl_bin_convert_tbl<-bin_res_map_df%>%
-  filter(!!rlang::sym(tmp_col) >= min(cl_bin) & !!rlang::sym(tmp_col) <= max(cl_bin))
+g_bpt<-as.igraph.Node(chr_bpt,directed = T,direction = 'climb')
 
-tmp_cl_child<-c(tmp_cl,names(which(unlist(lapply(node_ancestor, function(x){
-  tmp_cl %in% x
-})))))
-cl_leaves<-tmp_cl_child[tmp_cl_child %in% chr_bpt$Get('name',filterFun = isLeaf)]
-cl_node_set<-unique(c(cl_leaves,unique(unlist(node_ancestor[cl_leaves])))) 
+bpt_dist_mat<-distances(g_bpt,chr_leaves,chr_leaves)
 
-chr_bpt2<-FromListSimple(chr_spec_res$part_tree)
-
-Prune(chr_bpt2, function(x) x$name %in% cl_node_set)
-
-g_bpt<-as.igraph.Node(chr_bpt2,directed = T,direction = 'climb')
-
-bpt_dist_mat<-distances(g_bpt,cl_leaves,cl_leaves)
-
-cl_leaf_tbl<-tibble(leaf=cl_leaves,bin=chr_spec_res$cl_member[cl_leaves]) %>% 
+plan(multisession,workers=15)
+leaf_tbl<-tibble(leaf=chr_leaves,bin=chr_spec_res$cl_member[chr_leaves]) %>% 
   mutate(res=str_split_fixed(leaf,"_",2)[,1]) %>% 
-  mutate(GRange=pmap(list(chromo,bin,res),function(chromo,bin,res){
+  mutate(GRange=future_pmap(list(chromo,bin,res),function(chromo,bin,res){
     
     IRanges::reduce(GRanges(seqnames=chromo,
                             ranges = IRanges(start=as.numeric(bin),
@@ -131,12 +112,15 @@ cl_leaf_tbl<-tibble(leaf=cl_leaves,bin=chr_spec_res$cl_member[cl_leaves]) %>%
     
     
   }))
-hires_bin_tbl<-cl_bin_convert_tbl %>% 
+plan(sequential)
+
+plan(multisession,workers=15)
+hires_bin_tbl<-bin_res_map_df %>% 
   dplyr::select(contains("_5kb")) %>% 
   as_tibble %>% 
   dplyr::rename(start=bin_5kb) %>% 
   mutate(end=start + 4999) %>% 
-  mutate(GRange=pmap(list(chromo,start,end),function(chromo,start,end){
+  mutate(GRange=future_pmap(list(chromo,start,end),function(chromo,start,end){
     
     IRanges::reduce(GRanges(seqnames=chromo,
                             ranges = IRanges(start=start,
@@ -145,13 +129,15 @@ hires_bin_tbl<-cl_bin_convert_tbl %>%
     
     
   }))
-hires_bin_GrangeL<-GRangesList(hires_bin_tbl$GRange)
-cl_leaf_GrangeL<-GRangesList(cl_leaf_tbl$GRange)
+plan(sequential)
 
-bin_to_leaf_tbl<-findOverlaps(hires_bin_GrangeL,cl_leaf_GrangeL) %>% 
+hires_bin_GrangeL<-GRangesList(hires_bin_tbl$GRange)
+leaf_GrangeL<-GRangesList(leaf_tbl$GRange)
+
+bin_to_leaf_tbl<-findOverlaps(hires_bin_GrangeL,leaf_GrangeL) %>% 
   as_tibble %>% 
   mutate(bin=hires_bin_tbl$start[queryHits],
-         leaf=cl_leaf_tbl$leaf[subjectHits]) %>% 
+         leaf=leaf_tbl$leaf[subjectHits]) %>% 
   dplyr::select(bin,leaf)
 
 hi_res_inter_tbl<-expand_grid(ego=bin_to_leaf_tbl$bin,alter=bin_to_leaf_tbl$bin) %>% 
@@ -162,23 +148,19 @@ hi_res_inter_tbl<-expand_grid(ego=bin_to_leaf_tbl$bin,alter=bin_to_leaf_tbl$bin)
 hi_res_inter_tbl<-hi_res_inter_tbl %>% 
   mutate(bpt_dist=log(1/(1+bpt_dist_mat[as.matrix(hi_res_inter_tbl[,c(3,4)])])))
 
-
 cl_f_mat<-full_f_mat(hi_res_inter_tbl,5000)
 
-cl_hires_bin<-unique(c(hi_res_inter_tbl$ego,hi_res_inter_tbl$alter))
+cl_hires_bin<-sort(unique(c(hi_res_inter_tbl$ego,hi_res_inter_tbl$alter)))
 
-cl_hires_bin[which(cl_hires_bin %% 5e5 == 0)]/1e6
-tick_pos<-which(cl_hires_bin %% 5e5 == 0)/nrow(cl_f_mat)
-tick_label<-paste0(cl_hires_bin[which(cl_hires_bin %% 5e5 == 0)]/1e6,"Mb")
-# mar: margin parameters:  c(bottom, left, top, right)
-# cex.axis: axis tick label font size
-# mgp: position of axis elements: axis title, axis labels and axis line
-png(filename = "./img/test_tick.png", width =40,height = 50,units = 'mm',type='cairo',res=1000)
-par(mar=c(1.25,0,1.25,0),cex.axis = 0.4,mgp=c(3, 0.25, 0))
+tick_pos<-which(cl_hires_bin %% 1e7 == 0)/nrow(cl_f_mat)
+tick_label<-paste0(cl_hires_bin[which(cl_hires_bin %% 1e7 == 0)]/1e6,"Mb")
+
+png(filename = "~/data_transfer/chr_bpt_dist.png", width =40,height = 45,units = 'mm',type='cairo',res=1000)
+par(mar=c(1.25,0,0,0),cex.axis = 0.4,mgp=c(3, 0.25, 0))
 image(as.matrix(cl_f_mat),col=viridis(100),axes = FALSE)
 axis(1, at = tick_pos,
-     labels = tick_label,
-      
+     labels = tick_label
+     
 )
 
 dev.off()
