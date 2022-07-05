@@ -155,8 +155,8 @@ cl_hires_bin<-sort(unique(c(hi_res_inter_tbl$ego,hi_res_inter_tbl$alter)))
 tick_pos<-which(cl_hires_bin %% 1e7 == 0)/nrow(cl_f_mat)
 tick_label<-paste0(cl_hires_bin[which(cl_hires_bin %% 1e7 == 0)]/1e6,"Mb")
 
-png(filename = "~/data_transfer/chr_bpt_dist.png", width =40,height = 45,units = 'mm',type='cairo',res=1000)
-par(mar=c(1.25,0,0,0),cex.axis = 0.4,mgp=c(3, 0.25, 0))
+png(filename = "~/data_transfer/chr_bpt_dist.png", width =40,height = 50,units = 'mm',type='cairo',res=1000)
+par(mar=c(1.25,0,1.25,0),cex.axis = 0.4,mgp=c(3, 0.25, 0))
 image(as.matrix(cl_f_mat),col=viridis(100),axes = FALSE)
 axis(1, at = tick_pos,
      labels = tick_label
