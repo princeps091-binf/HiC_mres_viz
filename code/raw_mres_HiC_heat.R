@@ -243,9 +243,11 @@ legend(x = "top",
        xpd = TRUE)
 
 dev.off()
+
+save(tmp_f_dat,file = paste0("./data/",chromo,"_",tmp_cl,".Rda"))
 #==============================================
 library(plotgardener)
-max(cl_hires_bin)
+pageCreate(width = 3.25, height = 3.25, default.units = "inches",showGuides = F)
 
 test<-plotHicSquare(
   resolution = 5000,
@@ -254,10 +256,10 @@ test<-plotHicSquare(
   assembly = "hg19",
   x = 0.25, y = 0.25, width = 2.5, height = 2.5, default.units = "inches",
   draw=F)
-
-tmp_ego<-test$grobs$children$GRID.rect.425$x
-tmp_alter<-test$grobs$children$GRID.rect.425$y
-tmp_col<-test$grobs$children$GRID.rect.425$gp$fill
+heat_grob_id<-names(test[["grobs"]][["children"]])[2]
+tmp_ego<-test[["grobs"]][["children"]][[heat_grob_id]]$x
+tmp_alter<-test[["grobs"]][["children"]][[heat_grob_id]]$y
+tmp_col<-test[["grobs"]][["children"]][[heat_grob_id]]$gp$fill
 
 tmp_hic_col<-tibble(ego=as.numeric(str_split_fixed(tmp_ego,"native",n=2)[,1]),
                     alter=as.numeric(str_split_fixed(tmp_alter,"native",n=2)[,1]),
@@ -274,9 +276,8 @@ tmp_conv<-tmp_f_dat %>%
 tmp_hic_col<-tmp_hic_col %>% 
   left_join(.,tmp_conv)
 
-test$grobs$children$GRID.rect.425$gp$fill<-tmp_hic_col$code
+test[["grobs"]][["children"]][[heat_grob_id]]$gp$fill<-tmp_hic_col$code
 
-pageCreate(width = 3.25, height = 3.25, default.units = "inches")
 pagePlotPlace(
   plot=test,
   x = 0.25, y = 0.25, width = 2.5, height = 2.5,default.units = "inches"
@@ -285,5 +286,76 @@ pagePlotPlace(
 
 annoGenomeLabel(
   plot = test,
-  x = 0.25, y = 2.75, width = 2.5, height = 0.25, default.units = "inches",scale = "Mb"
+  axis = "y",
+  x = 0.075, y = 0.25, 
+  width = 2.5, height = 0.25, 
+  default.units = "inches",scale = "Mb"
 )
+
+## Plot gene track
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(org.Hs.eg.db)
+plotGenes(
+  chrom = "chr22", chromstart = 38100000, chromend = 39795000,
+  assembly = "hg19",
+  x = 0.25, y = 2.75, width = 2.5, height = 0.3,
+  just = c("left", "top"), default.units = "inches"
+)
+
+png(width = 3.25, height = 3.25,units = "in",filename = "./img/test_gardener.png",res=2000)
+pageCreate(width = 3.25, height = 3.25, default.units = "inches",showGuides = F)
+test<-plotHicSquare(
+  resolution = 5000,
+  data = tmp_f_dat,
+  chrom = "chr22", chromstart = 38100000, chromend = 39795000,
+  assembly = "hg19",
+  x = 0.25, y = 0.25, width = 2.5, height = 2.5, default.units = "inches",
+  draw=F)
+heat_grob_id<-names(test[["grobs"]][["children"]])[2]
+tmp_ego<-test[["grobs"]][["children"]][[heat_grob_id]]$x
+tmp_alter<-test[["grobs"]][["children"]][[heat_grob_id]]$y
+tmp_col<-test[["grobs"]][["children"]][[heat_grob_id]]$gp$fill
+
+tmp_hic_col<-tibble(ego=as.numeric(str_split_fixed(tmp_ego,"native",n=2)[,1]),
+                    alter=as.numeric(str_split_fixed(tmp_alter,"native",n=2)[,1]),
+                    fill=tmp_col)
+
+tmp_col<-p_col
+
+names(tmp_col)<-as.character(1:300)
+
+tmp_conv<-tmp_f_dat %>% 
+  bind_rows(tibble(ego=tmp_f_dat$alter,alter=tmp_f_dat$ego,color=tmp_f_dat$color)) %>% 
+  mutate(code=tmp_col[as.character(round(color))])
+
+tmp_hic_col<-tmp_hic_col %>% 
+  left_join(.,tmp_conv)
+
+test[["grobs"]][["children"]][[heat_grob_id]]$gp$fill<-tmp_hic_col$code
+
+pagePlotPlace(
+  plot=test,
+  x = 0.25, y = 0.25, width = 2.5, height = 2.5,default.units = "inches"
+)
+
+annoGenomeLabel(
+  plot = test,
+  axis = "y",
+  x = 0.075, y = 0.25, 
+  width = 2.5, height = 0.25, 
+  default.units = "inches",scale = "Mb"
+)
+plotGenes(
+  chrom = "chr22", chromstart = 38100000, chromend = 39795000,
+  assembly = "hg19",
+  x = 0.25, y = 2.75, width = 2.5, height = 0.3,
+  just = c("left", "top"), default.units = "inches"
+)
+plotSignal(
+  data = IMR90_ChIP_H3K27ac_signal,
+  chrom = "chr21", chromstart = 28000000, chromend = 30300000,
+  assembly = "hg19",
+  x = 0.5, y = 2.75, width = 2, height = 0.5,
+  just = c("left", "top"), default.units = "inches"
+)
+dev.off()
