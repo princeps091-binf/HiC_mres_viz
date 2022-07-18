@@ -19,10 +19,16 @@ get_tbl_in_fn<-function(tmp_file){
 }
 ########################################################################################################
 cl_heat_dat_file<-"./data/chr22_50kb_34_561_38100000_39750000.Rda"
+CAGE_tbl_file<-"./data/H1_enh_peak_track_tbl.Rda"
 tmp_cl<-"50kb_34_561_38100000_39750000"
 tmp_cl_res<-str_split_fixed(tmp_cl,pattern = "_",2)[,1]
 tmp_res_set<-names(which(res_num<=res_num[tmp_cl_res]))
 
+tmp_f_dat<-get_tbl_in_fn(cl_heat_dat_file)
+cage_tbl<-get_tbl_in_fn(CAGE_tbl_file) %>% 
+  dplyr::rename(chromstart=start,chromend=end)
+cage_tbl<-get_tbl_in_fn(CAGE_tbl_file)
+  
 p_breaks<-c(unlist(lapply(seq_along(tmp_res_set),function(x){
   seq((x-1)*100,(x-1)*100 +100,length.out = 101)[-101]
 })),(length(res_set)-1)*100 +100)
@@ -32,9 +38,9 @@ p_col<-unlist(lapply(seq_along(tmp_res_set),function(x){
   colorRampPalette(c("black",p_color[x]))(100)
 }))
 
-tmp_f_dat<-get_tbl_in_fn(cl_heat_dat_file)
 
-pageCreate(width = 3.25, height = 3.25, default.units = "inches",showGuides = F)
+
+pageCreate(width = 3.25, height = 3.25, default.units = "inches",showGuides = T)
 
 test<-plotHicSquare(
   resolution = 5000,
@@ -78,9 +84,16 @@ annoGenomeLabel(
   default.units = "inches",scale = "Mb"
 )
 
+plotSignal(
+  data = cage_tbl,
+  chrom = "chr22", chromstart = 38100000, chromend = 39795000,
+  assembly = "hg19",
+  x = 0.25, y = 2.8, width = 2.5, height = 0.2,
+  just = c("left", "top"), default.units = "inches")
+
 plotGenes(
   chrom = "chr22", chromstart = 38100000, chromend = 39795000,
   assembly = "hg19",
-  x = 0.25, y = 2.75, width = 2.5, height = 0.3,
+  x = 0.25, y = 3.05, width = 2.5, height = 0.2,
   just = c("left", "top"), default.units = "inches"
 )
