@@ -61,7 +61,7 @@ bin_map_res_fn<-function(chr_spec_res_99,res_num){
 #Extract children HiC data
 extract_cl_dat_fn<-function(child_cl_lvl_tbl,cl_dat_l){
   fn_env<-environment()
-  cl<-makeCluster(20)
+  cl<-makeCluster(5)
   clusterEvalQ(cl, {
     library(dplyr)
   })
@@ -102,10 +102,10 @@ full_f_mat<-function(cl_mat,res){
 }
 
 ########################################################################################################
-spec_res_folder<-"/storage/mathelierarea/processed/vipin/group/HiC_data/H1/Dekker/spec_res/"
-dat_folder<-"/storage/mathelierarea/processed/vipin/group/HiC_data/H1/Dekker/"
+spec_res_folder<-"~/Documents/multires_bhicect/data/H1/Dekker/spec_res/"
+dat_folder<-"~/Documents/multires_bhicect/data/H1/Dekker/"
+hub_folder<-"~/Documents/multires_bhicect/Bootstrapp_fn/data/DAGGER_tbl/trans_res/H1_union_trans_res_dagger_tbl.Rda"
 ########################################################################################################
-# Load considered chromosome
 chromo<-"chr22"
 chr_spec_res<-get_tbl_in_fn(paste0(spec_res_folder,chromo,"_spec_res.Rda"))
 chr_bpt<-FromListSimple(chr_spec_res$part_tree)
@@ -113,18 +113,24 @@ node_ancestor<-chr_bpt$Get(function(x){x$Get('name',traversal='ancestor')})
 node_ancestor<-lapply(node_ancestor,'[',-1)
 node_lvl<-sort(chr_bpt$Get('level'))[-c(1)]
 
-# Build resolution conversion table
+chr_hub_tbl<-get_tbl_in_fn(hub_folder) %>% 
+  filter(chr==chromo) %>% 
+  mutate(res=str_split_fixed(node,"_",2)[,1])
 bin_res_map_df<-bin_map_res_fn(chr_spec_res,res_num)
 bin_res_map_df[,1]<-as.numeric(as.character(bin_res_map_df[,1]))
 
-cl_lvl_tbl<-tibble(node=names(node_lvl),lvl=node_lvl,bins=chr_spec_res$cl_member[names(node_lvl)]) %>% 
+cl_lvl_tbl<-tibble(node=chr_hub_tbl$node,lvl=node_lvl[chr_hub_tbl$node],bins=chr_spec_res$cl_member[chr_hub_tbl$node]) %>% 
   mutate(res=str_split_fixed(node,"_",2)[,1])
-########################################################################################################
+
+hub_res_set<-unique(chr_hub_tbl$res)
+#-----------------------
 #Extract the interactions of every constitutive child-cluster
-chr_dat_l<-lapply(res_set,function(x)read_delim(file = paste0(dat_folder,x,'/',chromo,'.txt'),delim = '\t',col_names = F))
-names(chr_dat_l)<-res_set
+chr_dat_l<-lapply(hub_res_set,function(x)read_delim(file = paste0(dat_folder,x,'/',chromo,'.txt'),delim = '\t',col_names = F))
+names(chr_dat_l)<-hub_res_set
 chr_dat_l<-lapply(chr_dat_l,function(x){
-  x%>%filter(!(is.nan(X3)))%>%filter(X1!=X2)
+  return(x%>%
+    filter(!(is.nan(X3)))%>%
+    filter(X1!=X2))
 })
 chr_dat_l<-lapply(chr_dat_l,function(x){
   preprocessParams <- BoxCoxTrans(x$X3,na.rm = T)
@@ -133,33 +139,32 @@ chr_dat_l<-lapply(chr_dat_l,function(x){
   return(x)
 })
 # Produce color-scale separating each resolution into separate color-channel
-chr_dat_l<-lapply(seq_along(res_set),function(x){
-  tmp_dat<-chr_dat_l[[res_set[x]]]
+chr_dat_l<-lapply(seq_along(hub_res_set),function(x){
+  tmp_dat<-chr_dat_l[[hub_res_set[x]]]
   toMin<-(x-1)*100 +1
   toMax<-(x-1)*100 +99
   tmp_dat$color<-toMin+(tmp_dat$weight-min(tmp_dat$weight))/(max(tmp_dat$weight)-min(tmp_dat$weight))*(toMax-toMin)
   return(tmp_dat)
 })
-names(chr_dat_l)<-res_set
+names(chr_dat_l)<-hub_res_set
 #----------------------------------------------------------------------------------------------------
 
-cl_dat_l<-lapply(res_set,function(x){
+cl_dat_l<-lapply(hub_res_set,function(x){
   tmp_res_max<-cl_lvl_tbl %>% 
     filter(res==x) 
   bin_range<-range(as.numeric(unique(unlist(tmp_res_max$bins))))
   chr_dat_l[[x]]%>%
     filter(X1 <= bin_range[2] & X1 >= bin_range[1] & X2 <= bin_range[2] & X2 >= bin_range[1])
 })
-names(cl_dat_l)<-res_set
+names(cl_dat_l)<-hub_res_set
 
-#Extract original HiC data for every cluster at the resolution they are found
 cl_lvl_tbl<-extract_cl_dat_fn(cl_lvl_tbl,cl_dat_l)
 cl_lvl_tbl<-cl_lvl_tbl %>% 
   mutate(i=str_split_fixed(node,"_",4)[,3]) %>% 
   filter(i>0) %>% 
   dplyr::select(-i)
 
-cl<-makeCluster(20)
+cl<-makeCluster(5)
 clusterEvalQ(cl, {
   library(dplyr)
   library(tidyr)
@@ -183,13 +188,13 @@ cl_hires_dat_l<-parLapply(cl,1:nrow(cl_lvl_tbl),function(i){
     tmp_df<-tmp_df%>%mutate(pow=unlist(tmp_dat[x,4]))
     tmp_df<-tmp_df%>%mutate(res=tmp_res)
     tmp_df<-tmp_df%>%mutate(color=unlist(tmp_dat[x,5]))
+    tmp_df<-tmp_df%>%mutate(cl=i)
     
     return(tmp_df)}))  
   return(out_tbl)
 })
 stopCluster(cl)
 rm(cl)
-
 
 cl_lvl_tbl<-cl_lvl_tbl %>% 
   mutate(HiC.hires=cl_hires_dat_l)
@@ -227,6 +232,8 @@ p_col<-unlist(lapply(seq_along(res_set),function(x){
   colorRampPalette(c("black",p_color[x]))(100)
 }))
 
+cl_breaks<-sort(unique(tmp_seed$cl))
+colorRampPalette(color=RColorBrewer::brewer.pal(n=Inf,name = "Set1"),)
 cl_f_mat<-full_f_mat(tmp_seed,5000)
 
 cl_hires_bin<-sort(unique(c(tmp_seed$ego,tmp_seed$alter)))
@@ -234,9 +241,6 @@ cl_hires_bin<-sort(unique(c(tmp_seed$ego,tmp_seed$alter)))
 tick_pos<-which(cl_hires_bin %% 1e7 == 0)/nrow(cl_f_mat)
 tick_label<-paste0(cl_hires_bin[which(cl_hires_bin %% 1e7 == 0)]/1e6,"Mb")
 
-
-png(filename = "~/data_transfer/BHiCect_cl_mres_heat.png", width =40,height = 50,units = 'mm',type='cairo',res=1000)
-par(mar=c(1.25,0,1.25,0),cex.axis = 0.4,mgp=c(3, 0.25, 0))
 image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks,axes = FALSE)
 axis(1, at = tick_pos,
      labels = tick_label,
@@ -251,4 +255,3 @@ legend(x = "top",
        border=NA,
        cex = 0.3, # Change legend size
        xpd = TRUE)
-dev.off()
