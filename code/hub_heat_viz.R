@@ -128,9 +128,17 @@ hub_res_set<-unique(chr_hub_tbl$res)
 chr_dat_l<-lapply(hub_res_set,function(x)read_delim(file = paste0(dat_folder,x,'/',chromo,'.txt'),delim = '\t',col_names = F))
 names(chr_dat_l)<-hub_res_set
 chr_dat_l<-lapply(chr_dat_l,function(x){
-  return(x%>%
+  tmp<-x%>%
     filter(!(is.nan(X3)))%>%
-    filter(X1!=X2))
+    filter(X1!=X2)
+  tmp_bin<-unique(c(x$X1,x$X2))
+  tmp_self<-tibble(X1=tmp_bin,X2=tmp_bin) %>% 
+    left_join(.,x)
+  min_self<-min(tmp_self$X3,na.rm=T)
+  tmp_self<-tmp_self %>% 
+    mutate(X3=ifelse(is.na(X3),min_self,X3))
+  return(tmp %>% 
+           bind_rows(.,tmp_self))
 })
 chr_dat_l<-lapply(chr_dat_l,function(x){
   preprocessParams <- BoxCoxTrans(x$X3,na.rm = T)
@@ -159,6 +167,7 @@ cl_dat_l<-lapply(hub_res_set,function(x){
 names(cl_dat_l)<-hub_res_set
 
 cl_lvl_tbl<-extract_cl_dat_fn(cl_lvl_tbl,cl_dat_l)
+
 cl_lvl_tbl<-cl_lvl_tbl %>% 
   mutate(i=str_split_fixed(node,"_",4)[,3]) %>% 
   filter(i>0) %>% 
@@ -189,6 +198,8 @@ cl_hires_dat_l<-parLapply(cl,1:nrow(cl_lvl_tbl),function(i){
     tmp_df<-tmp_df%>%mutate(res=tmp_res)
     tmp_df<-tmp_df%>%mutate(color=unlist(tmp_dat[x,5]))
     tmp_df<-tmp_df%>%mutate(cl=i)
+    tmp_df<-tmp_df %>% filter(ego <= alter)
+    
     
     return(tmp_df)}))  
   return(out_tbl)
@@ -234,6 +245,7 @@ p_col<-unlist(lapply(seq_along(res_set),function(x){
 
 cl_breaks<-sort(unique(tmp_seed$cl))
 colorRampPalette(color=RColorBrewer::brewer.pal(n=Inf,name = "Set1"),)
+
 cl_f_mat<-full_f_mat(tmp_seed,5000)
 
 cl_hires_bin<-sort(unique(c(tmp_seed$ego,tmp_seed$alter)))
@@ -241,7 +253,13 @@ cl_hires_bin<-sort(unique(c(tmp_seed$ego,tmp_seed$alter)))
 tick_pos<-which(cl_hires_bin %% 1e7 == 0)/nrow(cl_f_mat)
 tick_label<-paste0(cl_hires_bin[which(cl_hires_bin %% 1e7 == 0)]/1e6,"Mb")
 
+
+png(filename = "./img/H1_hubs_chr22.png", width =50,height = 50,units = 'mm',type='cairo',res=1000)
+par(mar=c(0,0,0,0))
+
 image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks,axes = FALSE)
+dev.off()
+
 axis(1, at = tick_pos,
      labels = tick_label,
      
