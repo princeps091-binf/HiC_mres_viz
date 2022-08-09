@@ -102,9 +102,9 @@ full_f_mat<-function(cl_mat,res){
 }
 
 ########################################################################################################
-hub_folder<-"~/data_transfer/candidate_trans_DAGGER_hub/HMEC_union_trans_res_dagger_tbl.Rda"
-spec_res_folder<-"/storage/mathelierarea/processed/vipin/group/HiC_data/HMEC/HMEC/spec_res/"
-dat_folder<-"/storage/mathelierarea/processed/vipin/group/HiC_data/HMEC/HMEC/"
+hub_folder<-"~/data_transfer/candidate_trans_DAGGER_hub/GM12878_union_trans_res_dagger_tbl.Rda"
+spec_res_folder<-"/storage/mathelierarea/processed/vipin/group/HiC_data/GM12878/spec_res/"
+dat_folder<-"/storage/mathelierarea/processed/vipin/group/HiC_data/GM12878/"
 ########################################################################################################
 
 chromo<-"chr19"
@@ -150,8 +150,9 @@ chr_dat_l<-lapply(chr_dat_l,function(x){
 # Produce color-scale separating each resolution into separate color-channel
 chr_dat_l<-lapply(seq_along(hub_res_set),function(x){
   tmp_dat<-chr_dat_l[[hub_res_set[x]]]
-  toMin<-(x-1)*100 +1
-  toMax<-(x-1)*100 +99
+  res_idx<-which(res_set == hub_res_set[x])
+  toMin<-(res_idx-1)*100 +1
+  toMax<-(res_idx-1)*100 +99
   tmp_dat$color<-toMin+(tmp_dat$weight-min(tmp_dat$weight))/(max(tmp_dat$weight)-min(tmp_dat$weight))*(toMax-toMin)
   return(tmp_dat)
 })
@@ -246,7 +247,7 @@ p_col<-unlist(lapply(seq_along(res_set),function(x){
 
 cl_f_mat<-full_f_mat(tmp_seed,5000)
 
-png(filename = paste0("~/data_transfer/HMEC_hubs_",chromo,".png"), width =50,height = 50,units = 'mm',type='cairo',res=1000)
+png(filename = paste0("~/data_transfer/GM12878_hubs_",chromo,".png"), width =50,height = 50,units = 'mm',type='cairo',res=1000)
 par(mar=c(0,0,0,0))
 
 image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks,axes = FALSE)
