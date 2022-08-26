@@ -120,7 +120,7 @@ bin_res_map_df[,1]<-as.numeric(as.character(bin_res_map_df[,1]))
 #-----------------------
 chr_hub_tbl<-get_tbl_in_fn(hub_file) %>%
   filter(chr==chromo)
-tmp_cl<-"50kb_6_15_31600000_31850000"
+tmp_cl<-"50kb_34_561_38100000_39750000"
 tmp_cl_res<-str_split_fixed(tmp_cl,pattern = "_",2)[,1]
 tmp_res_set<-names(which(res_num<=res_num[tmp_cl_res]))
 
@@ -154,10 +154,11 @@ chr_dat_l<-lapply(chr_dat_l,function(x){
   return(x)
 })
 # Produce color-scale separating each resolution into separate color-channel
-chr_dat_l<-lapply(seq_along(tmp_res_set),function(x){
-  tmp_dat<-chr_dat_l[[tmp_res_set[x]]]
-  toMin<-(x-1)*100 +1
-  toMax<-(x-1)*100 +99
+chr_dat_l<-lapply(tmp_res_set,function(x){
+  tmp_dat<-chr_dat_l[[x]]
+  res_idx<-which(res_set==x)
+  toMin<-(res_idx-1)*100 +1
+  toMax<-(res_idx-1)*100 +99
   tmp_dat$color<-toMin+(tmp_dat$weight-min(tmp_dat$weight))/(max(tmp_dat$weight)-min(tmp_dat$weight))*(toMax-toMin)
   return(tmp_dat)
 })
@@ -239,13 +240,14 @@ for(i in lvl_seq[-1]){
     dplyr::select(-color.b)
 }
 
+save(tmp_seed,file = paste0("./data/",chromo,"_",tmp_cl,".Rda"))
 
-p_breaks<-c(unlist(lapply(seq_along(tmp_res_set),function(x){
+p_breaks<-c(unlist(lapply(seq_along(res_set),function(x){
   seq((x-1)*100,(x-1)*100 +100,length.out = 101)[-101]
 })),(length(res_set)-1)*100 +100)
 
-p_color<-rev(RColorBrewer::brewer.pal(n=length(tmp_res_set),name = "Set1"))
-p_col<-unlist(lapply(seq_along(tmp_res_set),function(x){
+p_color<-rev(RColorBrewer::brewer.pal(n=length(res_set),name = "Set1"))
+p_col<-unlist(lapply(seq_along(res_set),function(x){
   colorRampPalette(c("black",p_color[x]))(100)
 }))
 
@@ -256,7 +258,7 @@ cl_hires_bin<-sort(unique(c(tmp_seed$ego,tmp_seed$alter)))
 tick_pos<-which(cl_hires_bin %% 2e6 == 0)/nrow(cl_f_mat)
 tick_label<-paste0(cl_hires_bin[which(cl_hires_bin %% 2e6 == 0)]/1e6,"Mb")
 
-image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks,axes = FALSE)
+image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks,axes = FALSE,useRaster=T)
 axis(1, at = tick_pos,
      labels = tick_label,
      
@@ -273,7 +275,7 @@ legend(x = "top",
 png(filename = "./img/BHiCect_cl_mres_heat.png", width =40,height = 50,units = 'mm',type='cairo',res=1000)
 par(mar=c(1.25,0,1.25,0),cex.axis = 0.4,mgp=c(3, 0.25, 0))
 
-image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks,axes = FALSE)
+image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks,axes = FALSE,useRaster=T)
 axis(1, at = tick_pos,
      labels = tick_label,
      
@@ -288,3 +290,34 @@ legend(x = "top",
        xpd = TRUE)
 
 dev.off()
+redGradient <- matrix(hcl(0, 80, seq(50, 80, 10)),
+                      nrow=4, ncol=5)
+
+col_scale<- t(matrix(rep(rev(p_col),50),ncol=50))
+# interpolated
+grid.newpage()
+grid.raster(col_scale,x=unit(0.5,"npc"),y=unit(0.1,"npc"),height=unit(0.1,"npc"),width=unit(0.4,"npc"))
+# blocky
+grid.newpage()
+grid.raster(redGradient, interpolate=FALSE)
+
+#--------------------------------------------
+
+apply(cl_f_mat[1:3,],1,function(x){
+  p_col[findInterval(cl_f_mat[x,],p_breaks)]
+})
+
+image(as.matrix(cl_f_mat),col=p_col,breaks=p_breaks,axes = FALSE,useRaster=T)
+widthno <- ncol(x1) # specifies number of grid cells in x direction
+heightno <- nrow(x1) # number of grid cells in y direction
+xygrid <- expand.grid(seq(1,2*widthno,2)/(2*widthno),
+                      seq(1,2*heightno,2)/(2*heightno))
+pushViewport(viewport(angle=45))
+vp <- viewport(h=min(1, heightno/widthno),
+               w=min(1,widthno/heightno), gp=gpar(alpha=1))
+pushViewport(vp)
+grid.rect(height=1/heightno, width=1/widthno, x=rev(xygrid$Var1),
+          y=xygrid$Var2, gp=gpar(fill=rgb(rev(as.vector(t(x1))),
+                                          rev(as.vector(t(x2))),rev(as.vector(t(x3))),1),lty="blank"))
+upViewport()
+upViewport()
