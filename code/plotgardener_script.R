@@ -47,7 +47,8 @@ names(p_col_l)<-res_set
 
 cl_p_col<-unlist(p_col_l[tmp_res_set])
 
-pageCreate(width = 5, height =5, default.units = "inches",showGuides = T)
+png(filename = "./img/plotgardener_test_v2.png",width=5,height=5,units = "in",res=1000)
+pageCreate(width = 5, height =5, default.units = "inches",showGuides = F)
 page_viewport<-current.viewport()
 
 test<-plotHicSquare(
@@ -124,7 +125,7 @@ plotGenes(
 seekViewport(page_viewport$name)
 col_scale<- matrix(rep(rev(cl_p_col),50),ncol=50)
 grid.raster(col_scale,x=unit(3.75,"inches"),y=unit(5-2.25,"inches"),height=unit(0.5,"npc"),width=unit(0.05,"npc"))
-
+dev.off()
 
 #--------------------------------------------
 png(filename = "./img/plotgardener_test.png",width=3.25,height=3.5,units = "in",res=1000)
