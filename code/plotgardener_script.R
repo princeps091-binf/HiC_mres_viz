@@ -35,7 +35,7 @@ p_breaks<-c(unlist(lapply(seq_along(res_set),function(x){
   seq((x-1)*100,(x-1)*100 +100,length.out = 101)[-101]
 })),(length(res_set)-1)*100 +100)
 
-p_color<-rev(RColorBrewer::brewer.pal(n=length(res_set),name = "Set1"))
+p_color<-rev(RColorBrewer::brewer.pal(n=length(res_set),name = "Set2"))
 p_col<-unlist(lapply(seq_along(res_set),function(x){
   colorRampPalette(c("black",p_color[x]))(100)
 }))
@@ -87,6 +87,7 @@ pagePlotPlace(
 
 ideogramPlot <- plotIdeogram(
   chrom = "chr22", assembly = "hg19",
+  showBands=F,
   orientation = "h",
   x = 1, y = 0.5, width = 2.5, height = 0.2, just = "left"
 )
